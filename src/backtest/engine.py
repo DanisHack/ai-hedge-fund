@@ -9,7 +9,7 @@ import pandas as pd
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from src.backtest.metrics import compute_benchmark, compute_metrics
-from src.backtest.models import BacktestResult, PerformanceMetrics
+from src.backtest.models import BacktestResult
 from src.backtest.portfolio_tracker import PortfolioTracker
 from src.graph.workflow import run_hedge_fund
 

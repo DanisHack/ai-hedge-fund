@@ -4,7 +4,7 @@ from datetime import date
 import pytest
 
 from src.backtest.metrics import compute_metrics, _analyze_trades
-from src.backtest.models import PerformanceMetrics, PortfolioSnapshot, Trade
+from src.backtest.models import PortfolioSnapshot, Trade
 
 
 def _make_snapshot(d: date, total_value: float, daily_return=None) -> PortfolioSnapshot:

@@ -53,7 +53,7 @@ def _display_summary(result: BacktestResult) -> None:
         f"Period:       {result.start_date} to {result.end_date}",
         f"Frequency:    {result.frequency}",
         f"Steps:        {len(result.snapshots)}",
-        f"",
+        "",
         f"Initial:      ${result.initial_cash:>12,.2f}",
         f"Final:        ${result.final_value:>12,.2f}",
         f"P&L:          [{color}]${pnl:>12,.2f} ({pnl_pct:+.2f}%)[/{color}]",
@@ -217,7 +217,7 @@ def main():
     tickers = [t.strip().upper() for t in args.ticker.split(",")]
     benchmark = args.benchmark if args.benchmark.lower() != "none" else None
 
-    console.print(f"\n[bold green]AI Hedge Fund — Backtester[/bold green]")
+    console.print("\n[bold green]AI Hedge Fund — Backtester[/bold green]")
     console.print(f"Tickers: {', '.join(tickers)} | Period: {args.start_date} to {args.end_date} | Freq: {args.frequency}\n")
 
     engine = BacktestEngine(

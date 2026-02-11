@@ -1,5 +1,4 @@
 """Tests for BacktestEngine with mocked workflow."""
-from datetime import date
 from unittest.mock import patch
 
 import pytest
