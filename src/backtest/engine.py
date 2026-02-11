@@ -48,7 +48,7 @@ class BacktestEngine:
         freq_map = {
             "daily": "B",       # every business day
             "weekly": "W-FRI",  # every Friday
-            "monthly": "BM",    # last business day of month
+            "monthly": "BME",   # last business day of month
         }
         freq = freq_map.get(self.frequency)
         if freq is None:
