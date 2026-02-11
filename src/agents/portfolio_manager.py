@@ -76,7 +76,7 @@ def portfolio_manager_agent(state: AgentState) -> dict[str, Any]:
 
         elif direction == "bearish" and confidence >= SELL_CONFIDENCE_THRESHOLD:
             existing = portfolio_state.get("positions", {}).get(ticker, {})
-            existing_qty = existing.get("quantity", 0)
+            existing_qty = existing.get("shares", 0)
 
             if existing_qty > 0:
                 action = TradeAction.SELL

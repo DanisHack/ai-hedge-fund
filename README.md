@@ -15,7 +15,7 @@ Market Data (Polygon.io)
 │                                 │
 │   Fundamental  |  Technical     │
 │   Sentiment    |  Valuation     │
-│   Growth       |  Macro         │
+│   Growth       |                │
 └────────────────┬────────────────┘
                  |
                  v
@@ -73,8 +73,54 @@ poetry run python src/main.py --ticker AAPL,MSFT,NVDA
 
 ### 4. Backtest
 
+Run the strategy over a historical period and see how it would have performed:
+
 ```bash
-poetry run python src/backtester.py --ticker AAPL,MSFT,NVDA --start-date 2024-01-01 --end-date 2024-12-31
+poetry run python src/backtester.py \
+  --ticker AAPL,MSFT,NVDA \
+  --start-date 2024-01-01 \
+  --end-date 2024-12-31
+```
+
+The backtester steps through time, runs the full agent pipeline at each step, executes trades, and tracks portfolio performance.
+
+#### Backtester Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--ticker / -t` | required | Comma-separated tickers |
+| `--start-date` | required | Start date (YYYY-MM-DD) |
+| `--end-date` | required | End date (YYYY-MM-DD) |
+| `--cash` | 100000 | Starting capital |
+| `--frequency / -f` | weekly | Trading frequency: `daily`, `weekly`, `monthly` |
+| `--lookback` | 90 | Lookback window in days for each analysis step |
+| `--benchmark` | SPY | Benchmark ticker for comparison (`none` to disable) |
+| `--model` | gpt-4o-mini | LLM model name |
+| `--provider` | openai | LLM provider |
+| `--show-reasoning` | false | Log agent reasoning to console |
+| `--debug` | false | Enable debug logging |
+
+#### Output
+
+The backtester displays five sections:
+
+1. **Summary** — tickers, period, initial vs final value, P&L
+2. **Performance Metrics** — total/annualized return, Sharpe ratio, max drawdown, volatility, Calmar ratio (with benchmark comparison)
+3. **Trade Statistics** — win rate, profit factor, avg win/loss
+4. **Trade Log** — last 20 trades, color-coded by action
+5. **Equity Curve** — ASCII chart of portfolio value over time
+
+#### Example
+
+```bash
+# Monthly rebalance with $50k starting capital, compare against QQQ
+poetry run python src/backtester.py \
+  -t AAPL,MSFT,NVDA,GOOGL \
+  --start-date 2024-01-01 \
+  --end-date 2024-12-31 \
+  --frequency monthly \
+  --cash 50000 \
+  --benchmark QQQ
 ```
 
 ## Project Structure
