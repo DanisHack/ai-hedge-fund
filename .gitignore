@@ -63,4 +63,3 @@ node_modules/
 htmlcov/
 
 # Poetry
-poetry.lock
