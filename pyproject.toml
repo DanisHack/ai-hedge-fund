@@ -1,0 +1,46 @@
+[tool.poetry]
+name = "ai-hedge-fund"
+version = "0.1.0"
+description = "AI-powered hedge fund using multi-agent LLM system for US stock trading"
+authors = ["DanisHack"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# Agent framework
+langchain = "^0.3.7"
+langgraph = "^0.2.56"
+langchain-openai = "^0.3.0"
+langchain-anthropic = "^0.3.0"
+langchain-groq = "^0.2.0"
+langchain-google-genai = "^2.0.0"
+
+# Market data
+polygon-api-client = "^1.14.0"
+
+# Broker
+alpaca-py = "^0.31.0"
+
+# Data & analysis
+pandas = "^2.1.0"
+numpy = "^1.24.0"
+
+# Utilities
+python-dotenv = "^1.0.0"
+pydantic = "^2.4.2"
+rich = "^13.9.4"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-asyncio = "^0.21.0"
+ruff = "^0.6.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"

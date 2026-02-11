@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+.venv/
+ENV/
+
+# Environment Variables
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.cursorrules
+.cursorignore
+.cursorindexingignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Outputs
+outputs/
+*.png
+*.pdf
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Frontend
+node_modules/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Poetry
+poetry.lock
