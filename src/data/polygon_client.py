@@ -183,9 +183,9 @@ def get_company_news(
 
     kwargs: dict = {"ticker": ticker, "limit": limit, "order": "desc"}
     if start_date:
-        kwargs["published_utc.gte"] = start_date
+        kwargs["published_utc_gte"] = start_date
     if end_date:
-        kwargs["published_utc.lte"] = end_date
+        kwargs["published_utc_lte"] = end_date
 
     articles = []
     try:
