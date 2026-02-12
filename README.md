@@ -27,8 +27,12 @@ A multi-agent AI hedge fund that analyzes stocks using 8 specialized agents, man
                │                │               │
                │  ┌─────────────┼─────────────┐ │
                │  │  Persona Agents (opt-in)  │ │
-               │  │  ├── Warren Buffett       │ │
-               │  │  └── Benjamin Graham      │ │
+               │  │  12 investor personas     │ │
+               │  │  Buffett, Graham, Munger, │ │
+               │  │  Damodaran, Ackman, Wood, │ │
+               │  │  Burry, Pabrai, Lynch,    │ │
+               │  │  Fisher, Jhunjhunwala,    │ │
+               │  │  Druckenmiller            │ │
                │  └─────────────┬─────────────┘ │
                │                │               │
                └────────────────┼───────────────┘
@@ -54,14 +58,14 @@ All agents run in parallel via LangGraph fan-out, then converge through the risk
 
 ## Features
 
-- **8 analyst agents** — fundamentals, technical (6 indicators), sentiment, valuation (DCF + relative), growth, macro regime, plus 2 opt-in investor personas (Buffett, Graham)
+- **18 analyst agents** — 6 core analysts (fundamentals, technical, sentiment, valuation, growth, macro regime) plus 12 opt-in investor personas
 - **Dual mode** — rule-based scoring (no API key needed) or LLM-powered reasoning (`--use-llm`)
 - **Risk management** — correlation-aware position sizing, volatility penalties, exposure caps, consensus voting
 - **Downside protection** — fixed stop-loss, trailing stop-loss, and take-profit with automatic execution
 - **Backtesting engine** — daily/weekly/monthly frequency, benchmark comparison (SPY), performance metrics, equity curve, JSON/CSV export
 - **Paper trading** — persistent portfolio state, incremental trading cycles, full performance tracking
 - **5 LLM providers** — OpenAI, Anthropic, Groq, Google, DeepSeek
-- **292 unit tests** with CI on Python 3.11/3.12/3.13
+- **342 unit tests** with CI on Python 3.11/3.12/3.13
 
 ## Quick Start
 
@@ -163,7 +167,7 @@ State is persisted to `paper_portfolio.json` between runs. Use `--state-file` to
 | `--ticker / -t` | required | Comma-separated tickers |
 | `--cash` | 100000 | Starting capital |
 | `--use-llm` | false | Enable LLM reasoning |
-| `--personas` | none | Investor personas (`buffett`, `graham`, or `all`) |
+| `--personas` | none | Investor personas (e.g. `buffett,munger`, `wood`, or `all`) |
 | `--model` | gpt-4o-mini | LLM model name |
 | `--provider` | openai | LLM provider |
 | `--show-reasoning` | false | Log agent reasoning |
@@ -202,8 +206,18 @@ State is persisted to `paper_portfolio.json` between runs. Use `--state-file` to
 
 | Persona | Style |
 |---------|-------|
-| **Warren Buffett** | Competitive moats, margin of safety, ROE consistency, management quality |
-| **Benjamin Graham** | Graham Number, net-net value, P/E < 15, P/B < 1.5, earnings stability |
+| **Warren Buffett** | The Oracle of Omaha — wonderful companies at fair prices, moats, ROE consistency |
+| **Benjamin Graham** | Godfather of value investing — Graham Number, net-net, P/E < 15, margin of safety |
+| **Aswath Damodaran** | Dean of Valuation — DCF, story + numbers, ROIC vs WACC, disciplined valuation |
+| **Bill Ackman** | Activist investor — bold positions, margin improvement, operational turnarounds |
+| **Cathie Wood** | Innovation & disruption — revenue growth, TAM expansion, disruptive technology |
+| **Charlie Munger** | Quality-first — wonderful businesses at fair prices, high ROIC, durable moats |
+| **Michael Burry** | Contrarian deep value — tangible book, FCF yield, asset-backed undervaluation |
+| **Mohnish Pabrai** | Dhandho investor — asymmetric risk/reward, low downside, potential doubles |
+| **Peter Lynch** | Practical GARP — PEG ratio, ten-baggers, everyday businesses with earnings growth |
+| **Phil Fisher** | Scuttlebutt growth — revenue growth, margin expansion, R&D reinvestment |
+| **Rakesh Jhunjhunwala** | India's Big Bull — earnings acceleration, market leadership, growth conviction |
+| **Stanley Druckenmiller** | Macro legend — earnings momentum, asymmetric opportunities, macro tailwinds |
 
 ### Risk Manager
 
@@ -237,7 +251,7 @@ Priority: fixed stop > trailing stop > take-profit (first match wins per positio
 ```
 ai-hedge-fund/
 ├── src/
-│   ├── agents/           # 6 core + 2 persona + risk manager + portfolio manager
+│   ├── agents/           # 6 core + 12 persona + risk manager + portfolio manager
 │   ├── backtest/          # Engine, portfolio tracker, metrics, models, export
 │   ├── config/            # Settings (env vars), agent registry
 │   ├── data/              # Polygon.io client, data models, TTL cache
@@ -247,7 +261,7 @@ ai-hedge-fund/
 │   ├── main.py            # Single analysis CLI
 │   ├── backtester.py      # Backtest CLI
 │   └── paper_trader.py    # Paper trading CLI
-├── tests/                 # 292 unit tests
+├── tests/                 # 342 unit tests
 ├── .github/workflows/     # CI (Python 3.11/3.12/3.13)
 ├── pyproject.toml
 └── .env.example
