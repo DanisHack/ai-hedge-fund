@@ -141,6 +141,7 @@ All analysis flags above, plus:
 | Persona | Investment Style |
 |---------|-----------------|
 | Warren Buffett | Value investing — moats, margin of safety, ROE consistency, low debt |
+| Ben Graham | Deep value — Graham Number, earnings stability, financial strength, net-net |
 
 ### Pipeline Agents
 
@@ -162,7 +163,7 @@ ai-hedge-fund/
 │   ├── llm.py         # LLM factory (5 providers) + structured output caller
 │   ├── main.py        # CLI entry point
 │   └── backtester.py  # Backtest CLI entry point
-├── tests/             # 198 unit tests
+├── tests/             # 210 unit tests
 ├── pyproject.toml
 └── README.md
 ```

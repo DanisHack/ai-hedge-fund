@@ -187,4 +187,5 @@ class TestWorkflowPersonas:
     def test_workflow_with_all_personas(self):
         from src.graph.workflow import create_workflow
         workflow = create_workflow(personas=["all"])
-        assert len(workflow.nodes) == 8
+        # 5 analysts + 2 personas (buffett + graham) + risk_manager + portfolio_manager = 9
+        assert len(workflow.nodes) == 9
