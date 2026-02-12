@@ -32,27 +32,45 @@ python -m src.main --ticker AAPL --personas buffett,wood --use-llm
 
 ## How It Works
 
-The system runs as a pipeline. Every agent works independently in parallel, then their signals flow through risk management and into a final portfolio decision.
-
 ```
-         ┌── Fundamentals ──┐
-         ├── Technical ──────┤
-         ├── Sentiment ──────┤
-         ├── Valuation ──────┼──► Risk Manager ──► Portfolio Manager ──► Trades
-         ├── Growth ─────────┤
-         ├── Macro Regime ───┤
-         └── Personas (opt) ─┘
+        ┌─────────────────────────────────┐
+        │      Market Data (Polygon)      │   prices, financials, news
+        └───────────────┬─────────────────┘
+                        ▼
+        ┌─────────────────────────────────┐
+        │    6 Core Analysts (parallel)   │   each returns bullish /
+        │                                 │   bearish / neutral
+        │    fundamentals · technical     │   with a confidence score
+        │    sentiment · valuation        │
+        │    growth · macro regime        │
+        └───────────────┬─────────────────┘
+                        ▼
+        ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
+          12 Investor Personas (optional)     buffett · munger · burry
+        │                                 │   damodaran · wood · lynch
+          --personas buffett,wood             fisher · ackman · pabrai
+        │                                 │   graham · jhunjhunwala
+                                              druckenmiller
+        └ ─ ─ ─ ─ ─ ─ ─┬─ ─ ─ ─ ─ ─ ─ ─ ┘
+                        ▼
+        ┌─────────────────────────────────┐
+        │         Risk Manager            │   consensus vote, volatility
+        │                                 │   penalty, correlation caps,
+        │                                 │   position limits, exposure
+        └───────────────┬─────────────────┘
+                        ▼
+        ┌─────────────────────────────────┐
+        │       Portfolio Manager         │   signal → buy/sell/hold
+        │                                 │   confidence-based sizing
+        │                                 │   stop-loss & take-profit
+        └───────────────┬─────────────────┘
+                        ▼
+        ┌─────────────────────────────────┐
+        │           Trades                │   BUY  AAPL  50 shares
+        │                                 │   SELL MSFT  20 shares
+        │                                 │   HOLD NVDA
+        └─────────────────────────────────┘
 ```
-
-**Step 1: Analysis.** Six core analysts each examine the stock from a different angle — financials, price action, news, valuation, growth trajectory, and macro environment. They all run at the same time.
-
-**Step 2: Risk Management.** The risk manager collects every analyst's signal and applies constraints:
-- Takes a vote across all analysts (bullish vs bearish vs neutral)
-- Penalizes high-volatility stocks (>3% daily swings)
-- Groups correlated stocks together and caps each group at 40% of portfolio
-- Limits any single position to 25% and total exposure to 90%
-
-**Step 3: Execution.** The portfolio manager converts the risk-adjusted signals into actual trades — buy, sell, or hold — with dollar amounts sized by confidence level.
 
 Built with [LangGraph](https://github.com/langchain-ai/langgraph) for agent orchestration and [Polygon.io](https://polygon.io) for market data.
 
