@@ -9,7 +9,7 @@ import pandas as pd
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from src.backtest.metrics import compute_benchmark, compute_metrics
-from src.backtest.models import BacktestResult
+from src.backtest.models import BacktestResult, StopLossConfig
 from src.backtest.portfolio_tracker import PortfolioTracker
 from src.graph.workflow import run_hedge_fund
 
@@ -35,6 +35,7 @@ class BacktestEngine:
         benchmark_ticker: Optional[str] = "SPY",
         commission_rate: float = 0.001,
         slippage_rate: float = 0.00005,
+        stop_loss_config: StopLossConfig | None = None,
     ) -> None:
         self.tickers = tickers
         self.start_date = start_date
@@ -50,6 +51,7 @@ class BacktestEngine:
         self.benchmark_ticker = benchmark_ticker
         self.commission_rate = commission_rate
         self.slippage_rate = slippage_rate
+        self.stop_loss_config = stop_loss_config
 
     def _generate_step_dates(self) -> list[date]:
         """Generate trading dates based on frequency."""
@@ -71,7 +73,12 @@ class BacktestEngine:
         if not step_dates:
             raise ValueError(f"No trading dates between {self.start_date} and {self.end_date}")
 
-        tracker = PortfolioTracker(self.initial_cash, commission_rate=self.commission_rate, slippage_rate=self.slippage_rate)
+        tracker = PortfolioTracker(
+            self.initial_cash,
+            commission_rate=self.commission_rate,
+            slippage_rate=self.slippage_rate,
+            stop_loss_config=self.stop_loss_config,
+        )
 
         with Progress(
             SpinnerColumn(),
@@ -107,6 +114,8 @@ class BacktestEngine:
                     portfolio_output = data.get("portfolio_output", {})
                     current_prices = data.get("current_prices", {})
 
+                    tracker.update_high_water_marks(current_prices)
+                    tracker.check_stop_orders(current_prices, step_date)
                     tracker.apply_trades(portfolio_output, current_prices, step_date)
                     tracker.take_snapshot(step_date, current_prices)
 

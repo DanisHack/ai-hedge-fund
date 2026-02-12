@@ -2,7 +2,15 @@
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
-from src.agents.risk_manager import risk_manager_agent, _collect_signals_for_ticker
+import pytest
+
+from src.agents.risk_manager import (
+    _build_correlation_groups,
+    _collect_signals_for_ticker,
+    _compute_correlation_matrix,
+    _correlation_adjusted_position_size,
+    risk_manager_agent,
+)
 from src.data.models import Price
 
 
@@ -242,3 +250,151 @@ class TestRiskManagerAgent:
         adjusted = result["data"]["risk_adjusted_signals"]
         assert len(adjusted) == 2
         assert {a["ticker"] for a in adjusted} == {"AAPL", "MSFT"}
+
+
+class TestCorrelationMatrix:
+    @patch("src.agents.risk_manager.get_prices")
+    def test_perfectly_correlated_stocks(self, mock_prices):
+        closes = [100 + i for i in range(65)]
+        mock_prices.return_value = _make_prices(closes)
+
+        result = _compute_correlation_matrix(["AAPL", "MSFT"], "2024-01-01", "2024-06-01")
+
+        assert ("AAPL", "MSFT") in result
+        assert result[("AAPL", "MSFT")] == pytest.approx(1.0, abs=0.01)
+
+    @patch("src.agents.risk_manager.get_prices")
+    def test_uncorrelated_stocks(self, mock_prices):
+        def side_effect(ticker, *args, **kwargs):
+            if ticker == "AAPL":
+                return _make_prices([100 + i for i in range(65)])
+            else:
+                return _make_prices([100 + (-1) ** i * i * 0.5 for i in range(65)])
+
+        mock_prices.side_effect = side_effect
+
+        result = _compute_correlation_matrix(["AAPL", "MSFT"], "2024-01-01", "2024-06-01")
+
+        assert ("AAPL", "MSFT") in result
+        assert result[("AAPL", "MSFT")] < 0.7
+
+    @patch("src.agents.risk_manager.get_prices")
+    def test_insufficient_data_excluded(self, mock_prices):
+        mock_prices.return_value = _make_prices([100.0] * 10)
+
+        result = _compute_correlation_matrix(["AAPL", "MSFT"], "2024-01-01", "2024-06-01")
+
+        assert result == {}
+
+    @patch("src.agents.risk_manager.get_prices")
+    def test_api_error_handled_gracefully(self, mock_prices):
+        def side_effect(ticker, *args, **kwargs):
+            if ticker == "AAPL":
+                raise Exception("API error")
+            return _make_prices([100 + i for i in range(65)])
+
+        mock_prices.side_effect = side_effect
+
+        result = _compute_correlation_matrix(["AAPL", "MSFT", "GOOG"], "2024-01-01", "2024-06-01")
+
+        # AAPL excluded; MSFT-GOOG still computed
+        assert ("AAPL", "MSFT") not in result
+        assert ("MSFT", "GOOG") in result
+
+
+class TestCorrelationGroups:
+    def test_builds_group_from_high_correlation(self):
+        correlations = {
+            ("AAPL", "MSFT"): 0.85,
+            ("MSFT", "AAPL"): 0.85,
+        }
+        groups = _build_correlation_groups(["AAPL", "MSFT", "GOOG"], correlations)
+        assert len(groups) == 1
+        assert groups[0] == {"AAPL", "MSFT"}
+
+    def test_transitive_grouping(self):
+        correlations = {
+            ("A", "B"): 0.8, ("B", "A"): 0.8,
+            ("B", "C"): 0.8, ("C", "B"): 0.8,
+            ("A", "C"): 0.3, ("C", "A"): 0.3,
+        }
+        groups = _build_correlation_groups(["A", "B", "C"], correlations)
+        assert len(groups) == 1
+        assert groups[0] == {"A", "B", "C"}
+
+    def test_no_groups_when_all_below_threshold(self):
+        correlations = {
+            ("AAPL", "GOOG"): 0.3,
+            ("GOOG", "AAPL"): 0.3,
+        }
+        groups = _build_correlation_groups(["AAPL", "GOOG"], correlations)
+        assert groups == []
+
+
+class TestCorrelationAdjustedPositionSize:
+    def test_reduces_size_when_group_near_cap(self):
+        portfolio = {
+            "cash": 60_000,
+            "positions": {"MSFT": {"shares": 100, "avg_cost": 350.0}},
+            "total_value": 100_000,
+        }
+        correlation_groups = [{"AAPL", "MSFT"}]
+
+        adjusted, reason = _correlation_adjusted_position_size(
+            "AAPL", 25_000, portfolio, correlation_groups,
+        )
+
+        # Group cap = 100k * 0.40 = 40k. MSFT exposure = 100*350 = 35k. Remaining = 5k.
+        assert adjusted == 5_000
+        assert "MSFT" in reason
+
+    def test_no_reduction_when_no_correlated_positions(self):
+        portfolio = {
+            "cash": 100_000,
+            "positions": {},
+            "total_value": 100_000,
+        }
+        adjusted, reason = _correlation_adjusted_position_size(
+            "AAPL", 25_000, portfolio, [],
+        )
+        assert adjusted == 25_000
+        assert reason is None
+
+    def test_zero_remaining_capacity(self):
+        portfolio = {
+            "cash": 55_000,
+            "positions": {"MSFT": {"shares": 100, "avg_cost": 450.0}},
+            "total_value": 100_000,
+        }
+        correlation_groups = [{"AAPL", "MSFT"}]
+
+        adjusted, reason = _correlation_adjusted_position_size(
+            "AAPL", 25_000, portfolio, correlation_groups,
+        )
+
+        # Group cap = 40k, MSFT exposure = 45k > 40k → remaining = 0
+        assert adjusted == 0
+
+    @patch("src.agents.risk_manager.get_prices")
+    def test_end_to_end_reduces_for_correlated_buy(self, mock_prices):
+        # Both tickers have identical returns → correlation ~1.0
+        closes = [100 + i for i in range(65)]
+        mock_prices.return_value = _make_prices(closes)
+
+        portfolio = {
+            "cash": 60_000,
+            "positions": {"MSFT": {"shares": 100, "avg_cost": 350.0}},
+            "total_value": 100_000,
+        }
+        signals = {"agent_a": [_make_signal("AAPL", "bullish", 80)]}
+
+        result = risk_manager_agent(_make_state(
+            tickers=("AAPL",),
+            analyst_signals=signals,
+            portfolio=portfolio,
+        ))
+        adjusted = result["data"]["risk_adjusted_signals"]
+
+        # max_position_size should be reduced from 25k due to correlation with MSFT
+        assert adjusted[0]["max_position_size"] < 25_000
+        assert "correlation" in adjusted[0]["reasoning"].lower()

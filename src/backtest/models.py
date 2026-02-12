@@ -7,6 +7,17 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class StopLossConfig(BaseModel):
+    """Configuration for stop-loss and take-profit thresholds.
+
+    All values are percentages as decimals (e.g. 0.10 = 10%).
+    None means disabled.
+    """
+    stop_loss_pct: Optional[float] = None
+    trailing_stop_pct: Optional[float] = None
+    take_profit_pct: Optional[float] = None
+
+
 class Trade(BaseModel):
     """A single executed trade."""
     date: date
@@ -17,6 +28,7 @@ class Trade(BaseModel):
     total_value: float
     commission: float = 0.0
     slippage: float = 0.0
+    reason: str = "signal"  # "signal", "stop_loss", "trailing_stop", "take_profit"
 
 
 class HoldingDetail(BaseModel):

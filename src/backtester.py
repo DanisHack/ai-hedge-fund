@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 from src.backtest.engine import BacktestEngine
 from src.backtest.export import export_results
-from src.backtest.models import BacktestResult, BenchmarkResult, PerformanceMetrics
+from src.backtest.models import BacktestResult, BenchmarkResult, PerformanceMetrics, StopLossConfig
 from src.config.settings import DEFAULT_MODEL_NAME, DEFAULT_MODEL_PROVIDER
 
 console = Console()
@@ -46,6 +46,12 @@ def parse_args() -> argparse.Namespace:
                         help="Commission rate per trade as decimal (default: 0.001 = 0.1%%)")
     parser.add_argument("--slippage", type=float, default=0.00005,
                         help="Slippage rate per trade as decimal (default: 0.00005 = 0.005%%)")
+    parser.add_argument("--stop-loss", type=float, default=None,
+                        help="Fixed stop-loss percentage as decimal (e.g. 0.10 for 10%%)")
+    parser.add_argument("--trailing-stop", type=float, default=None,
+                        help="Trailing stop-loss percentage as decimal (e.g. 0.10 for 10%%)")
+    parser.add_argument("--take-profit", type=float, default=None,
+                        help="Take-profit percentage as decimal (e.g. 0.20 for 20%%)")
     return parser.parse_args()
 
 
@@ -234,6 +240,14 @@ def main():
     console.print("\n[bold green]AI Hedge Fund — Backtester[/bold green]")
     console.print(f"Tickers: {', '.join(tickers)} | Period: {args.start_date} to {args.end_date} | Freq: {args.frequency}\n")
 
+    stop_loss_config = None
+    if args.stop_loss is not None or args.trailing_stop is not None or args.take_profit is not None:
+        stop_loss_config = StopLossConfig(
+            stop_loss_pct=args.stop_loss,
+            trailing_stop_pct=args.trailing_stop,
+            take_profit_pct=args.take_profit,
+        )
+
     engine = BacktestEngine(
         tickers=tickers,
         start_date=args.start_date,
@@ -249,6 +263,7 @@ def main():
         benchmark_ticker=benchmark,
         commission_rate=args.commission,
         slippage_rate=args.slippage,
+        stop_loss_config=stop_loss_config,
     )
 
     try:

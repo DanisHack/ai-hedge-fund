@@ -67,7 +67,7 @@ class TestPersistence:
         state = _make_state()
         state.portfolio.cash = 91_000
         state.portfolio.positions = {
-            "AAPL": PositionState(shares=50, avg_cost=180.0),
+            "AAPL": PositionState(shares=50, avg_cost=180.0, high_water_mark=195.0),
         }
         state.trades = [
             Trade(date=date(2024, 1, 15), ticker="AAPL", action="buy",
@@ -93,6 +93,7 @@ class TestPersistence:
         assert loaded.portfolio.cash == 91_000
         assert loaded.portfolio.positions["AAPL"].shares == 50
         assert loaded.portfolio.positions["AAPL"].avg_cost == 180.0
+        assert loaded.portfolio.positions["AAPL"].high_water_mark == 195.0
         assert loaded.run_count == 1
         assert len(loaded.trades) == 1
         assert loaded.trades[0].ticker == "AAPL"
@@ -126,7 +127,7 @@ class TestTrackerConversion:
         state = _make_state()
         state.portfolio.cash = 80_000
         state.portfolio.positions = {
-            "AAPL": PositionState(shares=100, avg_cost=200.0),
+            "AAPL": PositionState(shares=100, avg_cost=200.0, high_water_mark=220.0),
         }
 
         tracker = to_tracker(state)
@@ -134,7 +135,25 @@ class TestTrackerConversion:
         assert tracker.cash == 80_000
         assert tracker.positions["AAPL"]["shares"] == 100
         assert tracker.positions["AAPL"]["avg_cost"] == 200.0
+        assert tracker.positions["AAPL"]["high_water_mark"] == 220.0
         assert tracker.commission_rate == 0.001
+
+    def test_to_tracker_hwm_fallback_to_avg_cost(self):
+        state = _make_state()
+        state.portfolio.positions = {
+            "AAPL": PositionState(shares=10, avg_cost=150.0),  # hwm defaults to 0.0
+        }
+        tracker = to_tracker(state)
+        assert tracker.positions["AAPL"]["high_water_mark"] == 150.0  # falls back to avg_cost
+
+    def test_to_tracker_with_stop_loss_config(self):
+        config = _make_config(stop_loss_pct=0.10, trailing_stop_pct=0.15, take_profit_pct=0.25)
+        state = _make_state(config=config)
+        tracker = to_tracker(state)
+        assert tracker.stop_loss_config is not None
+        assert tracker.stop_loss_config.stop_loss_pct == 0.10
+        assert tracker.stop_loss_config.trailing_stop_pct == 0.15
+        assert tracker.stop_loss_config.take_profit_pct == 0.25
 
     def test_from_tracker(self):
         state = _make_state()
@@ -142,7 +161,7 @@ class TestTrackerConversion:
 
         # Simulate trades
         tracker.cash = 85_000
-        tracker.positions = {"MSFT": {"shares": 20, "avg_cost": 350.0}}
+        tracker.positions = {"MSFT": {"shares": 20, "avg_cost": 350.0, "high_water_mark": 370.0}}
         tracker.trades.append(
             Trade(date=date(2024, 2, 1), ticker="MSFT", action="buy",
                   quantity=20, price=350.0, total_value=7000.0),
@@ -156,6 +175,7 @@ class TestTrackerConversion:
 
         assert updated.portfolio.cash == 85_000
         assert updated.portfolio.positions["MSFT"].shares == 20
+        assert updated.portfolio.positions["MSFT"].high_water_mark == 370.0
         assert updated.run_count == 1
         assert updated.last_run is not None
         assert len(updated.trades) == 1

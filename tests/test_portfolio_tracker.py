@@ -3,6 +3,7 @@ from datetime import date
 
 import pytest
 
+from src.backtest.models import StopLossConfig
 from src.backtest.portfolio_tracker import PortfolioTracker
 
 
@@ -322,3 +323,149 @@ class TestTakeSnapshot:
         tracker.take_snapshot(date(2024, 1, 2), {})
         tracker.take_snapshot(date(2024, 1, 3), {})
         assert len(tracker.snapshots) == 3
+
+
+class TestHighWaterMark:
+    def test_update_increases_hwm(self):
+        tracker = PortfolioTracker(100_000)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0, "high_water_mark": 100.0}
+        tracker.update_high_water_marks({"AAPL": 120.0})
+        assert tracker.positions["AAPL"]["high_water_mark"] == 120.0
+
+    def test_update_does_not_decrease_hwm(self):
+        tracker = PortfolioTracker(100_000)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0, "high_water_mark": 130.0}
+        tracker.update_high_water_marks({"AAPL": 120.0})
+        assert tracker.positions["AAPL"]["high_water_mark"] == 130.0
+
+    def test_buy_initializes_hwm(self):
+        tracker = PortfolioTracker(100_000)
+        output = {"positions": [{"ticker": "AAPL", "action": "buy", "quantity": 10}]}
+        tracker.apply_trades(output, {"AAPL": 150.0}, date(2024, 1, 1))
+        assert tracker.positions["AAPL"]["high_water_mark"] == 150.0
+
+    def test_missing_price_leaves_hwm_unchanged(self):
+        tracker = PortfolioTracker(100_000)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0, "high_water_mark": 110.0}
+        tracker.update_high_water_marks({})
+        assert tracker.positions["AAPL"]["high_water_mark"] == 110.0
+
+
+class TestStopLossOrders:
+    def test_no_config_returns_empty(self):
+        tracker = PortfolioTracker(100_000)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0, "high_water_mark": 100.0}
+        result = tracker.check_stop_orders({"AAPL": 50.0}, date(2024, 1, 1))
+        assert result == []
+        assert "AAPL" in tracker.positions
+
+    def test_fixed_stop_loss_triggers(self):
+        config = StopLossConfig(stop_loss_pct=0.10)
+        tracker = PortfolioTracker(50_000, stop_loss_config=config)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0, "high_water_mark": 110.0}
+
+        result = tracker.check_stop_orders({"AAPL": 85.0}, date(2024, 1, 1))
+
+        assert len(result) == 1
+        assert result[0].ticker == "AAPL"
+        assert result[0].reason == "stop_loss"
+        assert result[0].quantity == 10
+        assert "AAPL" not in tracker.positions
+        assert tracker.cash == 50_000 + 10 * 85.0
+
+    def test_fixed_stop_loss_does_not_trigger_below_threshold(self):
+        config = StopLossConfig(stop_loss_pct=0.10)
+        tracker = PortfolioTracker(50_000, stop_loss_config=config)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0, "high_water_mark": 105.0}
+
+        result = tracker.check_stop_orders({"AAPL": 95.0}, date(2024, 1, 1))
+        assert result == []
+        assert "AAPL" in tracker.positions
+
+    def test_trailing_stop_triggers(self):
+        config = StopLossConfig(trailing_stop_pct=0.15)
+        tracker = PortfolioTracker(50_000, stop_loss_config=config)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 80.0, "high_water_mark": 110.0}
+
+        # 18% drop from HWM: (110 - 90) / 110 = 0.1818
+        result = tracker.check_stop_orders({"AAPL": 90.0}, date(2024, 1, 1))
+
+        assert len(result) == 1
+        assert result[0].reason == "trailing_stop"
+        assert "AAPL" not in tracker.positions
+
+    def test_trailing_stop_does_not_trigger_within_threshold(self):
+        config = StopLossConfig(trailing_stop_pct=0.15)
+        tracker = PortfolioTracker(50_000, stop_loss_config=config)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 80.0, "high_water_mark": 110.0}
+
+        # 9% drop from HWM: (110 - 100) / 110 = 0.0909
+        result = tracker.check_stop_orders({"AAPL": 100.0}, date(2024, 1, 1))
+        assert result == []
+        assert "AAPL" in tracker.positions
+
+    def test_take_profit_triggers(self):
+        config = StopLossConfig(take_profit_pct=0.20)
+        tracker = PortfolioTracker(50_000, stop_loss_config=config)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0, "high_water_mark": 125.0}
+
+        # 25% gain: (125 - 100) / 100 = 0.25
+        result = tracker.check_stop_orders({"AAPL": 125.0}, date(2024, 1, 1))
+
+        assert len(result) == 1
+        assert result[0].reason == "take_profit"
+
+    def test_take_profit_does_not_trigger_below_threshold(self):
+        config = StopLossConfig(take_profit_pct=0.20)
+        tracker = PortfolioTracker(50_000, stop_loss_config=config)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0, "high_water_mark": 115.0}
+
+        # 15% gain: below 20% threshold
+        result = tracker.check_stop_orders({"AAPL": 115.0}, date(2024, 1, 1))
+        assert result == []
+
+    def test_fixed_stop_takes_priority_over_trailing(self):
+        config = StopLossConfig(stop_loss_pct=0.10, trailing_stop_pct=0.10)
+        tracker = PortfolioTracker(50_000, stop_loss_config=config)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0, "high_water_mark": 100.0}
+
+        result = tracker.check_stop_orders({"AAPL": 85.0}, date(2024, 1, 1))
+        assert result[0].reason == "stop_loss"
+
+    def test_multiple_positions_checked(self):
+        config = StopLossConfig(stop_loss_pct=0.10)
+        tracker = PortfolioTracker(50_000, stop_loss_config=config)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0, "high_water_mark": 100.0}
+        tracker.positions["MSFT"] = {"shares": 5, "avg_cost": 400.0, "high_water_mark": 400.0}
+
+        # AAPL drops 15%, MSFT drops 5%
+        result = tracker.check_stop_orders(
+            {"AAPL": 85.0, "MSFT": 380.0}, date(2024, 1, 1)
+        )
+
+        assert len(result) == 1
+        assert result[0].ticker == "AAPL"
+        assert "MSFT" in tracker.positions
+
+    def test_stop_loss_with_commission_and_slippage(self):
+        config = StopLossConfig(stop_loss_pct=0.10)
+        tracker = PortfolioTracker(
+            50_000, commission_rate=0.001, slippage_rate=0.0005,
+            stop_loss_config=config,
+        )
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0, "high_water_mark": 100.0}
+
+        tracker.check_stop_orders({"AAPL": 85.0}, date(2024, 1, 1))
+
+        gross = 10 * 85.0
+        expected_cash = 50_000 + gross - (gross * 0.001) - (gross * 0.0005)
+        assert tracker.cash == pytest.approx(expected_cash)
+
+    def test_missing_price_skipped(self):
+        config = StopLossConfig(stop_loss_pct=0.10)
+        tracker = PortfolioTracker(50_000, stop_loss_config=config)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0, "high_water_mark": 100.0}
+
+        result = tracker.check_stop_orders({}, date(2024, 1, 1))
+        assert result == []
+        assert "AAPL" in tracker.positions

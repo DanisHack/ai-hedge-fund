@@ -54,6 +54,8 @@ class PaperTradingRunner:
         portfolio_output = data.get("portfolio_output", {})
         current_prices = data.get("current_prices", {})
 
+        tracker.update_high_water_marks(current_prices)
+        tracker.check_stop_orders(current_prices, today)
         tracker.apply_trades(portfolio_output, current_prices, today)
         tracker.take_snapshot(today, current_prices)
 

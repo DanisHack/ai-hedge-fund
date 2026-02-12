@@ -55,6 +55,12 @@ def parse_args() -> argparse.Namespace:
                             help="Use LLM reasoning for analyst agents")
     run_parser.add_argument("--personas", type=str, default=None,
                             help='Investor personas (e.g. buffett,graham or "all")')
+    run_parser.add_argument("--stop-loss", type=float, default=None,
+                            help="Fixed stop-loss percentage as decimal (e.g. 0.10 for 10%%)")
+    run_parser.add_argument("--trailing-stop", type=float, default=None,
+                            help="Trailing stop-loss percentage as decimal (e.g. 0.10 for 10%%)")
+    run_parser.add_argument("--take-profit", type=float, default=None,
+                            help="Take-profit percentage as decimal (e.g. 0.20 for 20%%)")
     run_parser.add_argument("--show-reasoning", action="store_true",
                             help="Log agent reasoning")
     run_parser.add_argument("--debug", action="store_true",
@@ -77,6 +83,12 @@ def parse_args() -> argparse.Namespace:
                               help="Commission rate per trade (default: 0.001)")
     reset_parser.add_argument("--slippage", type=float, default=0.00005,
                               help="Slippage rate per trade (default: 0.00005)")
+    reset_parser.add_argument("--stop-loss", type=float, default=None,
+                              help="Fixed stop-loss percentage as decimal (e.g. 0.10 for 10%%)")
+    reset_parser.add_argument("--trailing-stop", type=float, default=None,
+                              help="Trailing stop-loss percentage as decimal (e.g. 0.10 for 10%%)")
+    reset_parser.add_argument("--take-profit", type=float, default=None,
+                              help="Take-profit percentage as decimal (e.g. 0.20 for 20%%)")
 
     return parser.parse_args()
 
@@ -229,6 +241,9 @@ def cmd_run(args: argparse.Namespace) -> None:
             lookback_days=args.lookback,
             commission_rate=args.commission,
             slippage_rate=args.slippage,
+            stop_loss_pct=args.stop_loss,
+            trailing_stop_pct=args.trailing_stop,
+            take_profit_pct=args.take_profit,
         )
         state = create_initial_state(config)
         console.print(f"[bold green]New paper portfolio created[/bold green] (${args.cash:,.0f})")
@@ -289,6 +304,9 @@ def cmd_reset(args: argparse.Namespace) -> None:
         lookback_days=args.lookback,
         commission_rate=args.commission,
         slippage_rate=args.slippage,
+        stop_loss_pct=args.stop_loss,
+        trailing_stop_pct=args.trailing_stop,
+        take_profit_pct=args.take_profit,
     )
     state = create_initial_state(config)
     save_state(state, args.state_file)

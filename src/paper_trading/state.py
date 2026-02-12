@@ -9,7 +9,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from src.backtest.models import PortfolioSnapshot, Trade
+from src.backtest.models import PortfolioSnapshot, StopLossConfig, Trade
 from src.backtest.portfolio_tracker import PortfolioTracker
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,7 @@ class PositionState(BaseModel):
     """Persisted position for a single ticker."""
     shares: int
     avg_cost: float
+    high_water_mark: float = 0.0
 
 
 class PortfolioState(BaseModel):
@@ -34,6 +35,9 @@ class PaperTradingConfig(BaseModel):
     lookback_days: int = 90
     commission_rate: float = 0.001
     slippage_rate: float = 0.00005
+    stop_loss_pct: Optional[float] = None
+    trailing_stop_pct: Optional[float] = None
+    take_profit_pct: Optional[float] = None
 
 
 class PaperTradingState(BaseModel):
@@ -78,14 +82,28 @@ def save_state(state: PaperTradingState, path: str) -> None:
 
 def to_tracker(state: PaperTradingState) -> PortfolioTracker:
     """Reconstruct a PortfolioTracker from saved state."""
+    cfg = state.config
+    stop_config = None
+    if cfg.stop_loss_pct is not None or cfg.trailing_stop_pct is not None or cfg.take_profit_pct is not None:
+        stop_config = StopLossConfig(
+            stop_loss_pct=cfg.stop_loss_pct,
+            trailing_stop_pct=cfg.trailing_stop_pct,
+            take_profit_pct=cfg.take_profit_pct,
+        )
+
     tracker = PortfolioTracker(
-        initial_cash=state.config.initial_cash,
-        commission_rate=state.config.commission_rate,
-        slippage_rate=state.config.slippage_rate,
+        initial_cash=cfg.initial_cash,
+        commission_rate=cfg.commission_rate,
+        slippage_rate=cfg.slippage_rate,
+        stop_loss_config=stop_config,
     )
     tracker.cash = state.portfolio.cash
     tracker.positions = {
-        ticker: {"shares": pos.shares, "avg_cost": pos.avg_cost}
+        ticker: {
+            "shares": pos.shares,
+            "avg_cost": pos.avg_cost,
+            "high_water_mark": pos.high_water_mark if pos.high_water_mark > 0 else pos.avg_cost,
+        }
         for ticker, pos in state.portfolio.positions.items()
     }
     tracker.trades = list(state.trades)
@@ -97,7 +115,11 @@ def from_tracker(tracker: PortfolioTracker, state: PaperTradingState) -> PaperTr
     """Update state from tracker after a trading cycle."""
     state.portfolio.cash = tracker.cash
     state.portfolio.positions = {
-        ticker: PositionState(shares=pos["shares"], avg_cost=pos["avg_cost"])
+        ticker: PositionState(
+            shares=pos["shares"],
+            avg_cost=pos["avg_cost"],
+            high_water_mark=pos.get("high_water_mark", pos["avg_cost"]),
+        )
         for ticker, pos in tracker.positions.items()
     }
     state.trades = tracker.trades
