@@ -8,9 +8,10 @@ from typing import Any
 import numpy as np
 from langchain_core.messages import HumanMessage
 
-from src.data.models import AnalystSignal, SignalType
+from src.data.models import AnalystSignal, LLMAnalysisResult, SignalType
 from src.data.polygon_client import get_prices
 from src.graph.state import AgentState
+from src.llm import call_llm
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def technical_agent(state: AgentState) -> dict[str, Any]:
 
     for ticker in tickers:
         try:
-            signal, latest_price = _analyze_ticker(ticker, start_date, end_date)
+            signal, latest_price = _analyze_ticker(ticker, start_date, end_date, metadata=state["metadata"])
             if latest_price is not None:
                 current_prices[ticker] = latest_price
         except Exception as e:
@@ -64,7 +65,7 @@ def technical_agent(state: AgentState) -> dict[str, Any]:
 
 
 def _analyze_ticker(
-    ticker: str, start_date: str, end_date: str,
+    ticker: str, start_date: str, end_date: str, metadata: dict | None = None,
 ) -> tuple[AnalystSignal, float | None]:
     """Run technical analysis on a single ticker. Returns (signal, latest_price)."""
     prices = get_prices(ticker, start_date, end_date)
@@ -85,10 +86,13 @@ def _analyze_ticker(
     score = 0
     max_score = 0
     reasons: list[str] = []
+    analysis_data: dict[str, Any] = {}
 
     # --- SMA Crossover (20 vs 50) ---
     sma_20 = float(np.mean(closes[-20:]))
     sma_50 = float(np.mean(closes[-50:]))
+    analysis_data["sma_20"] = sma_20
+    analysis_data["sma_50"] = sma_50
     max_score += 2
     if sma_20 > sma_50:
         score += 2
@@ -100,6 +104,7 @@ def _analyze_ticker(
 
     # --- RSI(14) ---
     rsi = _compute_rsi(closes, period=14)
+    analysis_data["rsi"] = rsi
     max_score += 2
     if rsi is not None:
         if rsi < 30:
@@ -119,6 +124,7 @@ def _analyze_ticker(
         max_score += 1
         vol_10 = float(np.mean(volumes[-10:]))
         vol_50 = float(np.mean(volumes[-50:]))
+        analysis_data["volume_ratio"] = vol_10 / vol_50 if vol_50 > 0 else 0
         if vol_50 > 0 and vol_10 > vol_50 * 1.2:
             score += 1
             reasons.append(f"Rising volume ({vol_10 / vol_50:.1f}x 50d avg)")
@@ -129,6 +135,7 @@ def _analyze_ticker(
     # --- Price vs SMA50 ---
     max_score += 1
     current_price = float(closes[-1])
+    analysis_data["current_price"] = current_price
     if current_price > sma_50:
         score += 1
         reasons.append(f"Price ${current_price:.2f} above SMA50 ${sma_50:.2f}")
@@ -146,13 +153,67 @@ def _analyze_ticker(
     else:
         signal_type = SignalType.NEUTRAL
 
-    return (
-        AnalystSignal(
-            agent_id=AGENT_ID, ticker=ticker,
-            signal=signal_type, confidence=confidence,
-            reasoning="; ".join(reasons),
+    rule_based = AnalystSignal(
+        agent_id=AGENT_ID, ticker=ticker,
+        signal=signal_type, confidence=confidence,
+        reasoning="; ".join(reasons),
+    )
+
+    if metadata and metadata.get("use_llm") and analysis_data:
+        llm_signal = _llm_analyze(ticker, analysis_data, rule_based, metadata)
+        return llm_signal, current_price
+
+    return rule_based, current_price
+
+
+def _llm_analyze(
+    ticker: str,
+    analysis_data: dict[str, Any],
+    rule_based: AnalystSignal,
+    metadata: dict,
+) -> AnalystSignal:
+    """Use LLM to reason about technical indicators."""
+    facts = [
+        f"- SMA20: ${analysis_data['sma_20']:.2f}",
+        f"- SMA50: ${analysis_data['sma_50']:.2f}",
+        f"- Current Price: ${analysis_data['current_price']:.2f}",
+    ]
+    if analysis_data.get("rsi") is not None:
+        facts.append(f"- RSI(14): {analysis_data['rsi']:.1f}")
+    if "volume_ratio" in analysis_data:
+        facts.append(f"- Volume (10d/50d): {analysis_data['volume_ratio']:.1f}x")
+
+    prompt = (
+        f"You are a technical analyst evaluating {ticker}.\n\n"
+        f"Technical Indicators:\n"
+        + "\n".join(facts)
+        + f"\n\nRule-based score: {rule_based.confidence}% ({rule_based.signal.value})\n\n"
+        "Analyze the technical picture. Consider:\n"
+        "1. SMA crossover: Is the short-term trend aligned with the long-term?\n"
+        "2. RSI: Is the stock overbought/oversold? Any divergence?\n"
+        "3. Volume: Does volume confirm the price trend?\n"
+        "4. Price position: Where is price relative to key moving averages?\n"
+        "5. Confluence: Do multiple indicators agree or conflict?\n\n"
+        "Provide a trading signal (bullish/bearish/neutral), confidence 0-100, "
+        "and 2-4 sentence reasoning citing specific data points."
+    )
+
+    result = call_llm(
+        prompt=prompt,
+        response_model=LLMAnalysisResult,
+        model_name=metadata.get("model_name", "gpt-4o-mini"),
+        model_provider=metadata.get("model_provider", "openai"),
+        default_factory=lambda: LLMAnalysisResult(
+            signal=rule_based.signal,
+            confidence=rule_based.confidence,
+            reasoning=rule_based.reasoning,
         ),
-        current_price,
+    )
+
+    return AnalystSignal(
+        agent_id=AGENT_ID, ticker=ticker,
+        signal=result.signal, confidence=result.confidence,
+        reasoning=result.reasoning,
     )
 
 

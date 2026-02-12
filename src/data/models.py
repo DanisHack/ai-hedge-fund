@@ -88,6 +88,13 @@ class AnalystSignal(BaseModel):
     reasoning: str
 
 
+class LLMAnalysisResult(BaseModel):
+    """Structured output from LLM-powered analyst reasoning."""
+    signal: SignalType = Field(description="Trading signal: bullish, bearish, or neutral")
+    confidence: float = Field(ge=0, le=100, description="Confidence level 0-100")
+    reasoning: str = Field(description="2-4 sentence explanation citing specific data points")
+
+
 class TradeAction(str, Enum):
     """Portfolio manager trade action."""
     BUY = "buy"

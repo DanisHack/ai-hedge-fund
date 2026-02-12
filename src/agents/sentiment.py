@@ -7,9 +7,10 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from src.data.models import AnalystSignal, SignalType
+from src.data.models import AnalystSignal, LLMAnalysisResult, SignalType
 from src.data.polygon_client import get_company_news
 from src.graph.state import AgentState
+from src.llm import call_llm
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ def sentiment_agent(state: AgentState) -> dict[str, Any]:
 
     for ticker in tickers:
         try:
-            signal = _analyze_ticker(ticker, start_date, end_date)
+            signal = _analyze_ticker(ticker, start_date, end_date, metadata=state["metadata"])
         except Exception as e:
             logger.warning(f"[{AGENT_ID}] Failed to analyze {ticker}: {e}")
             signal = AnalystSignal(
@@ -72,7 +73,7 @@ def sentiment_agent(state: AgentState) -> dict[str, Any]:
     }
 
 
-def _analyze_ticker(ticker: str, start_date: str, end_date: str) -> AnalystSignal:
+def _analyze_ticker(ticker: str, start_date: str, end_date: str, metadata: dict | None = None) -> AnalystSignal:
     """Run sentiment analysis on a single ticker."""
     news = get_company_news(ticker, start_date=start_date, end_date=end_date, limit=20)
 
@@ -129,8 +130,67 @@ def _analyze_ticker(ticker: str, start_date: str, end_date: str) -> AnalystSigna
         confidence = max(10, confidence - 20)
         reasons.append(f"Low sample size ({len(news)} articles), reduced confidence")
 
-    return AnalystSignal(
+    rule_based = AnalystSignal(
         agent_id=AGENT_ID, ticker=ticker,
         signal=signal, confidence=confidence,
         reasoning="; ".join(reasons),
+    )
+
+    if metadata and metadata.get("use_llm") and news:
+        analysis_data = {
+            "article_count": len(news),
+            "positive_count": positive_count,
+            "negative_count": negative_count,
+            "neutral_count": neutral_count,
+            "sentiment_score": sentiment_score,
+            "headlines": [a.title for a in news[:10]],
+        }
+        return _llm_analyze(ticker, analysis_data, rule_based, metadata)
+
+    return rule_based
+
+
+def _llm_analyze(
+    ticker: str,
+    analysis_data: dict,
+    rule_based: AnalystSignal,
+    metadata: dict,
+) -> AnalystSignal:
+    """Use LLM to interpret news headlines and sentiment."""
+    headlines = "\n".join(f"- {h}" for h in analysis_data["headlines"])
+
+    prompt = (
+        f"You are a sentiment analyst evaluating {ticker}.\n\n"
+        f"Recent Headlines:\n{headlines}\n\n"
+        f"Keyword-based analysis: {analysis_data['article_count']} articles — "
+        f"{analysis_data['positive_count']} positive, "
+        f"{analysis_data['negative_count']} negative, "
+        f"{analysis_data['neutral_count']} neutral\n"
+        f"Sentiment score: {analysis_data['sentiment_score']:.2f} "
+        f"(rule-based: {rule_based.signal.value}, {rule_based.confidence}%)\n\n"
+        "Analyze the actual headline content for nuance that keyword matching misses. Consider:\n"
+        "1. Are positive/negative keywords misleading in context?\n"
+        "2. What is the overall narrative — growth story, trouble brewing, or mixed?\n"
+        "3. How significant are the events (earnings vs. minor news)?\n"
+        "4. Sample size: is there enough data to be confident?\n\n"
+        "Provide a trading signal (bullish/bearish/neutral), confidence 0-100, "
+        "and 2-4 sentence reasoning."
+    )
+
+    result = call_llm(
+        prompt=prompt,
+        response_model=LLMAnalysisResult,
+        model_name=metadata.get("model_name", "gpt-4o-mini"),
+        model_provider=metadata.get("model_provider", "openai"),
+        default_factory=lambda: LLMAnalysisResult(
+            signal=rule_based.signal,
+            confidence=rule_based.confidence,
+            reasoning=rule_based.reasoning,
+        ),
+    )
+
+    return AnalystSignal(
+        agent_id=AGENT_ID, ticker=ticker,
+        signal=result.signal, confidence=result.confidence,
+        reasoning=result.reasoning,
     )

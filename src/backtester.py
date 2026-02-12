@@ -36,6 +36,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL_NAME, help="LLM model name")
     parser.add_argument("--provider", type=str, default=DEFAULT_MODEL_PROVIDER, help="LLM provider")
     parser.add_argument("--show-reasoning", action="store_true", help="Log agent reasoning")
+    parser.add_argument("--use-llm", action="store_true", default=False,
+                        help="Use LLM reasoning for analyst agents (requires API key)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--export", type=str, default=None, help="Export results to file (e.g. results.json or results.csv)")
     parser.add_argument("--commission", type=float, default=0.001,
@@ -239,6 +241,7 @@ def main():
         model_name=args.model,
         model_provider=args.provider,
         show_reasoning=args.show_reasoning,
+        use_llm=args.use_llm,
         benchmark_ticker=benchmark,
         commission_rate=args.commission,
         slippage_rate=args.slippage,

@@ -60,6 +60,7 @@ def run_hedge_fund(
     model_name: str = "gpt-4o-mini",
     model_provider: str = "openai",
     show_reasoning: bool = True,
+    use_llm: bool = False,
 ) -> dict[str, Any]:
     """Execute the full hedge fund workflow.
 
@@ -89,6 +90,7 @@ def run_hedge_fund(
             "model_name": model_name,
             "model_provider": model_provider,
             "show_reasoning": show_reasoning,
+            "use_llm": use_llm,
         },
     }
 

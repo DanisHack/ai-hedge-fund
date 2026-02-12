@@ -7,9 +7,10 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from src.data.models import AnalystSignal, SignalType
+from src.data.models import AnalystSignal, LLMAnalysisResult, SignalType
 from src.data.polygon_client import get_financial_metrics
 from src.graph.state import AgentState
+from src.llm import call_llm
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ def growth_agent(state: AgentState) -> dict[str, Any]:
 
     for ticker in tickers:
         try:
-            signal = _analyze_ticker(ticker, end_date)
+            signal = _analyze_ticker(ticker, end_date, metadata=state["metadata"])
         except Exception as e:
             logger.warning(f"[{AGENT_ID}] Failed to analyze {ticker}: {e}")
             signal = AnalystSignal(
@@ -56,7 +57,7 @@ def growth_agent(state: AgentState) -> dict[str, Any]:
     }
 
 
-def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
+def _analyze_ticker(ticker: str, end_date: str, metadata: dict | None = None) -> AnalystSignal:
     """Run growth analysis on a single ticker."""
     metrics = get_financial_metrics(ticker, end_date=end_date, limit=8)
 
@@ -70,6 +71,7 @@ def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
     score = 0
     max_score = 0
     reasons: list[str] = []
+    analysis_data: dict[str, Any] = {}
 
     # --- 1. Revenue Growth Rate ---
     rev_growth_rates = _compute_growth_rates([m.revenue for m in metrics])
@@ -77,6 +79,8 @@ def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
         max_score += 3
         latest_rev_growth = rev_growth_rates[0]
         avg_rev_growth = sum(rev_growth_rates) / len(rev_growth_rates)
+        analysis_data["latest_rev_growth"] = latest_rev_growth
+        analysis_data["avg_rev_growth"] = avg_rev_growth
 
         if latest_rev_growth > 0.15:
             score += 3
@@ -95,6 +99,7 @@ def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
     if earnings_growth_rates:
         max_score += 3
         latest_earn_growth = earnings_growth_rates[0]
+        analysis_data["latest_earn_growth"] = latest_earn_growth
 
         if latest_earn_growth > 0.20:
             score += 3
@@ -112,6 +117,7 @@ def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
     if len(rev_growth_rates) >= 2:
         max_score += 2
         acceleration = rev_growth_rates[0] - rev_growth_rates[1]
+        analysis_data["acceleration"] = acceleration
 
         if acceleration > 0.02:
             score += 2
@@ -127,6 +133,9 @@ def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
         max_score += 2
         positive_periods = sum(1 for r in rev_growth_rates if r > 0)
         consistency = positive_periods / len(rev_growth_rates)
+        analysis_data["consistency"] = consistency
+        analysis_data["positive_periods"] = positive_periods
+        analysis_data["total_periods"] = len(rev_growth_rates)
 
         if consistency >= 0.8:
             score += 2
@@ -142,6 +151,9 @@ def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
     if len(margins) >= 2:
         max_score += 2
         margin_change = margins[0] - margins[-1]
+        analysis_data["margin_latest"] = margins[0]
+        analysis_data["margin_oldest"] = margins[-1]
+        analysis_data["margin_change"] = margin_change
 
         if margin_change > 0.02:
             score += 2
@@ -170,10 +182,70 @@ def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
     else:
         signal = SignalType.NEUTRAL
 
-    return AnalystSignal(
+    rule_based = AnalystSignal(
         agent_id=AGENT_ID, ticker=ticker,
         signal=signal, confidence=confidence,
         reasoning="; ".join(reasons),
+    )
+
+    if metadata and metadata.get("use_llm") and analysis_data:
+        return _llm_analyze(ticker, analysis_data, rule_based, metadata)
+
+    return rule_based
+
+
+def _llm_analyze(
+    ticker: str,
+    analysis_data: dict[str, Any],
+    rule_based: AnalystSignal,
+    metadata: dict,
+) -> AnalystSignal:
+    """Use LLM to reason about growth trajectory."""
+    facts = []
+    if "latest_rev_growth" in analysis_data:
+        facts.append(f"- Revenue Growth (latest): {analysis_data['latest_rev_growth']:.1%}")
+        facts.append(f"- Revenue Growth (avg): {analysis_data['avg_rev_growth']:.1%}")
+    if "latest_earn_growth" in analysis_data:
+        facts.append(f"- Earnings Growth (latest): {analysis_data['latest_earn_growth']:.1%}")
+    if "acceleration" in analysis_data:
+        facts.append(f"- Growth Acceleration: {analysis_data['acceleration']:+.1%}pp")
+    if "consistency" in analysis_data:
+        facts.append(f"- Consistency: {analysis_data['positive_periods']}/{analysis_data['total_periods']} positive periods")
+    if "margin_change" in analysis_data:
+        facts.append(f"- Margin Trend: {analysis_data['margin_oldest']:.1%} → {analysis_data['margin_latest']:.1%} "
+                      f"(change: {analysis_data['margin_change']:+.1%})")
+
+    prompt = (
+        f"You are a growth analyst evaluating {ticker}.\n\n"
+        f"Growth Metrics:\n"
+        + "\n".join(facts)
+        + f"\n\nRule-based score: {rule_based.confidence}% ({rule_based.signal.value})\n\n"
+        "Analyze the growth trajectory. Consider:\n"
+        "1. Growth quality: Is it driven by margin expansion or just top-line?\n"
+        "2. Acceleration: Is growth speeding up or slowing down?\n"
+        "3. Consistency: How reliable is the growth track record?\n"
+        "4. Earnings vs revenue: Are earnings growing faster (operating leverage)?\n"
+        "5. Sustainability: Can this growth rate be maintained?\n\n"
+        "Provide a trading signal (bullish/bearish/neutral), confidence 0-100, "
+        "and 2-4 sentence reasoning citing specific data points."
+    )
+
+    result = call_llm(
+        prompt=prompt,
+        response_model=LLMAnalysisResult,
+        model_name=metadata.get("model_name", "gpt-4o-mini"),
+        model_provider=metadata.get("model_provider", "openai"),
+        default_factory=lambda: LLMAnalysisResult(
+            signal=rule_based.signal,
+            confidence=rule_based.confidence,
+            reasoning=rule_based.reasoning,
+        ),
+    )
+
+    return AnalystSignal(
+        agent_id=AGENT_ID, ticker=ticker,
+        signal=result.signal, confidence=result.confidence,
+        reasoning=result.reasoning,
     )
 
 

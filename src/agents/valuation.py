@@ -7,9 +7,10 @@ from typing import Any, Optional
 
 from langchain_core.messages import HumanMessage
 
-from src.data.models import AnalystSignal, SignalType
+from src.data.models import AnalystSignal, LLMAnalysisResult, SignalType
 from src.data.polygon_client import get_company_details, get_financial_metrics
 from src.graph.state import AgentState
+from src.llm import call_llm
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def valuation_agent(state: AgentState) -> dict[str, Any]:
 
     for ticker in tickers:
         try:
-            signal = _analyze_ticker(ticker, end_date)
+            signal = _analyze_ticker(ticker, end_date, metadata=state["metadata"])
         except Exception as e:
             logger.warning(f"[{AGENT_ID}] Failed to analyze {ticker}: {e}")
             signal = AnalystSignal(
@@ -62,7 +63,7 @@ def valuation_agent(state: AgentState) -> dict[str, Any]:
     }
 
 
-def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
+def _analyze_ticker(ticker: str, end_date: str, metadata: dict | None = None) -> AnalystSignal:
     """Run valuation analysis on a single ticker."""
     metrics = get_financial_metrics(ticker, end_date=end_date, limit=4)
     details = get_company_details(ticker)
@@ -80,10 +81,13 @@ def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
     score = 0
     max_score = 0
     reasons: list[str] = []
+    analysis_data: dict[str, Any] = {}
 
     # --- 1. DCF Valuation ---
     dcf_value = _simple_dcf(metrics)
     if dcf_value is not None and market_cap is not None and market_cap > 0:
+        analysis_data["dcf_value"] = dcf_value
+        analysis_data["market_cap"] = market_cap
         max_score += 3
         ratio = dcf_value / market_cap
 
@@ -104,12 +108,15 @@ def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
                            f"(significantly overvalued)")
 
     # --- 2. Earnings Yield (inverse P/E) ---
+    if market_cap:
+        analysis_data["market_cap"] = market_cap
     if latest.earnings_per_share and market_cap and details:
         shares = details.weighted_shares_outstanding or details.share_class_shares_outstanding
         if shares and shares > 0:
             max_score += 2
             pe_ratio = market_cap / (latest.earnings_per_share * shares)
 
+            analysis_data["pe_ratio"] = pe_ratio
             if 0 < pe_ratio < 15:
                 score += 2
                 reasons.append(f"P/E={pe_ratio:.1f} (attractively valued)")
@@ -126,6 +133,7 @@ def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
         max_score += 1
         pb_ratio = market_cap / latest.shareholders_equity
 
+        analysis_data["pb_ratio"] = pb_ratio
         if pb_ratio < 3:
             score += 1
             reasons.append(f"P/B={pb_ratio:.1f} (reasonable)")
@@ -136,6 +144,7 @@ def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
     if latest.operating_cash_flow and market_cap and market_cap > 0:
         max_score += 2
         fcf_yield = latest.operating_cash_flow / market_cap
+        analysis_data["fcf_yield"] = fcf_yield
 
         if fcf_yield > 0.06:
             score += 2
@@ -166,10 +175,67 @@ def _analyze_ticker(ticker: str, end_date: str) -> AnalystSignal:
     else:
         signal = SignalType.NEUTRAL
 
-    return AnalystSignal(
+    rule_based = AnalystSignal(
         agent_id=AGENT_ID, ticker=ticker,
         signal=signal, confidence=confidence,
         reasoning="; ".join(reasons),
+    )
+
+    if metadata and metadata.get("use_llm") and analysis_data:
+        return _llm_analyze(ticker, analysis_data, rule_based, metadata)
+
+    return rule_based
+
+
+def _llm_analyze(
+    ticker: str,
+    analysis_data: dict[str, Any],
+    rule_based: AnalystSignal,
+    metadata: dict,
+) -> AnalystSignal:
+    """Use LLM to reason about valuation data."""
+    facts = []
+    if "dcf_value" in analysis_data and "market_cap" in analysis_data:
+        dcf_b = analysis_data["dcf_value"] / 1e9
+        mkt_b = analysis_data["market_cap"] / 1e9
+        facts.append(f"- DCF Intrinsic Value: ${dcf_b:.1f}B vs Market Cap: ${mkt_b:.1f}B")
+    if "pe_ratio" in analysis_data:
+        facts.append(f"- P/E Ratio: {analysis_data['pe_ratio']:.1f}")
+    if "pb_ratio" in analysis_data:
+        facts.append(f"- P/B Ratio: {analysis_data['pb_ratio']:.1f}")
+    if "fcf_yield" in analysis_data:
+        facts.append(f"- Free Cash Flow Yield: {analysis_data['fcf_yield']:.1%}")
+
+    prompt = (
+        f"You are a valuation analyst evaluating {ticker}.\n\n"
+        f"Valuation Metrics:\n"
+        + "\n".join(facts)
+        + f"\n\nRule-based score: {rule_based.confidence}% ({rule_based.signal.value})\n\n"
+        "Synthesize these valuation methods and provide your assessment. Consider:\n"
+        "1. Do multiple valuation methods agree on direction?\n"
+        "2. Is there a margin of safety at the current price?\n"
+        "3. Could a low P/E be a value trap (declining business)?\n"
+        "4. Is the FCF yield sustainable or one-time?\n\n"
+        "Provide a trading signal (bullish/bearish/neutral), confidence 0-100, "
+        "and 2-4 sentence reasoning citing specific data points."
+    )
+
+    result = call_llm(
+        prompt=prompt,
+        response_model=LLMAnalysisResult,
+        model_name=metadata.get("model_name", "gpt-4o-mini"),
+        model_provider=metadata.get("model_provider", "openai"),
+        default_factory=lambda: LLMAnalysisResult(
+            signal=rule_based.signal,
+            confidence=rule_based.confidence,
+            reasoning=rule_based.reasoning,
+        ),
+    )
+
+    return AnalystSignal(
+        agent_id=AGENT_ID, ticker=ticker,
+        signal=result.signal, confidence=result.confidence,
+        reasoning=result.reasoning,
     )
 
 

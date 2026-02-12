@@ -26,6 +26,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL_NAME, help="LLM model name")
     parser.add_argument("--provider", type=str, default=DEFAULT_MODEL_PROVIDER, help="LLM provider")
     parser.add_argument("--show-reasoning", action="store_true", default=True)
+    parser.add_argument("--use-llm", action="store_true", default=False,
+                        help="Use LLM reasoning for analyst agents (requires API key)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
@@ -123,6 +125,7 @@ def main():
             model_name=args.model,
             model_provider=args.provider,
             show_reasoning=args.show_reasoning,
+            use_llm=args.use_llm,
         )
         display_results(final_state)
     except Exception as e:
