@@ -38,6 +38,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--show-reasoning", action="store_true", help="Log agent reasoning")
     parser.add_argument("--use-llm", action="store_true", default=False,
                         help="Use LLM reasoning for analyst agents (requires API key)")
+    parser.add_argument("--personas", type=str, default=None,
+                        help='Investor personas to include (e.g. buffett,graham or "all")')
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--export", type=str, default=None, help="Export results to file (e.g. results.json or results.csv)")
     parser.add_argument("--commission", type=float, default=0.001,
@@ -226,6 +228,7 @@ def main():
     )
 
     tickers = [t.strip().upper() for t in args.ticker.split(",")]
+    personas = [p.strip().lower() for p in args.personas.split(",")] if args.personas else None
     benchmark = args.benchmark if args.benchmark.lower() != "none" else None
 
     console.print("\n[bold green]AI Hedge Fund — Backtester[/bold green]")
@@ -242,6 +245,7 @@ def main():
         model_provider=args.provider,
         show_reasoning=args.show_reasoning,
         use_llm=args.use_llm,
+        personas=personas,
         benchmark_ticker=benchmark,
         commission_rate=args.commission,
         slippage_rate=args.slippage,

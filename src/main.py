@@ -28,6 +28,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--show-reasoning", action="store_true", default=True)
     parser.add_argument("--use-llm", action="store_true", default=False,
                         help="Use LLM reasoning for analyst agents (requires API key)")
+    parser.add_argument("--personas", type=str, default=None,
+                        help='Investor personas to include (e.g. buffett,graham or "all")')
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
@@ -112,6 +114,7 @@ def main():
     )
 
     tickers = [t.strip().upper() for t in args.ticker.split(",")]
+    personas = [p.strip().lower() for p in args.personas.split(",")] if args.personas else None
     portfolio = {"cash": args.cash, "positions": {}, "total_value": args.cash}
 
     console.print(f"\n[bold green]AI Hedge Fund[/bold green] — Analyzing {', '.join(tickers)}\n")
@@ -126,6 +129,7 @@ def main():
             model_provider=args.provider,
             show_reasoning=args.show_reasoning,
             use_llm=args.use_llm,
+            personas=personas,
         )
         display_results(final_state)
     except Exception as e:

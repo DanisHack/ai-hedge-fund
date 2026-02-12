@@ -31,6 +31,7 @@ class BacktestEngine:
         model_provider: str = "openai",
         show_reasoning: bool = False,
         use_llm: bool = False,
+        personas: list[str] | None = None,
         benchmark_ticker: Optional[str] = "SPY",
         commission_rate: float = 0.001,
         slippage_rate: float = 0.00005,
@@ -45,6 +46,7 @@ class BacktestEngine:
         self.model_provider = model_provider
         self.show_reasoning = show_reasoning
         self.use_llm = use_llm
+        self.personas = personas
         self.benchmark_ticker = benchmark_ticker
         self.commission_rate = commission_rate
         self.slippage_rate = slippage_rate
@@ -98,6 +100,7 @@ class BacktestEngine:
                         model_provider=self.model_provider,
                         show_reasoning=self.show_reasoning,
                         use_llm=self.use_llm,
+                        personas=self.personas,
                     )
 
                     data = result.get("data", {})

@@ -9,29 +9,43 @@ from langgraph.graph import END, START, StateGraph
 
 from src.agents.portfolio_manager import portfolio_manager_agent
 from src.agents.risk_manager import risk_manager_agent
-from src.config.agents import ANALYST_CONFIG
+from src.config.agents import ANALYST_CONFIG, PERSONA_CONFIG
 from src.graph.state import AgentState
 
 logger = logging.getLogger(__name__)
 
 
-def create_workflow() -> StateGraph:
+def create_workflow(personas: list[str] | None = None) -> StateGraph:
     """Build the LangGraph workflow.
 
     Topology:
         START ──┬── analyst_1 ──┐
                 ├── analyst_2 ──┤
+                ├── persona_1 ──┤
                 └── ...       ──┤
                                 ├── risk_manager ── portfolio_manager ── END
     """
     workflow = StateGraph(AgentState)
 
-    # Register analyst nodes
+    # Register core analyst nodes
     analyst_node_names: list[str] = []
     for key, (node_name, agent_func) in ANALYST_CONFIG.items():
         workflow.add_node(node_name, agent_func)
         analyst_node_names.append(node_name)
         logger.debug(f"Registered analyst node: {node_name}")
+
+    # Register persona nodes (opt-in)
+    if personas:
+        available = set(PERSONA_CONFIG.keys())
+        requested = set(personas) if personas != ["all"] else available
+        for key in requested & available:
+            node_name, agent_func = PERSONA_CONFIG[key]
+            workflow.add_node(node_name, agent_func)
+            analyst_node_names.append(node_name)
+            logger.debug(f"Registered persona node: {node_name}")
+        unknown = requested - available
+        if unknown:
+            logger.warning(f"Unknown personas ignored: {unknown}. Available: {available}")
 
     # Register risk manager and portfolio manager
     workflow.add_node("risk_manager", risk_manager_agent)
@@ -61,6 +75,7 @@ def run_hedge_fund(
     model_provider: str = "openai",
     show_reasoning: bool = True,
     use_llm: bool = False,
+    personas: list[str] | None = None,
 ) -> dict[str, Any]:
     """Execute the full hedge fund workflow.
 
@@ -73,7 +88,7 @@ def run_hedge_fund(
     if portfolio is None:
         portfolio = {"cash": 100000, "positions": {}, "total_value": 100000}
 
-    workflow = create_workflow()
+    workflow = create_workflow(personas=personas)
     graph = workflow.compile()
 
     initial_state: AgentState = {
