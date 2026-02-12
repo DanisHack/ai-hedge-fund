@@ -198,6 +198,86 @@ class TestApplyTrades:
         assert tracker.cash == 100_000 - (5 * 150.0 + 3 * 400.0)
 
 
+class TestTransactionCosts:
+    def test_buy_with_commission(self):
+        tracker = PortfolioTracker(100_000, commission_rate=0.001, slippage_rate=0.00005)
+        output = {
+            "positions": [
+                {"ticker": "AAPL", "action": "buy", "quantity": 10},
+            ]
+        }
+        tracker.apply_trades(output, {"AAPL": 150.0}, date(2024, 1, 1))
+
+        gross_cost = 10 * 150.0
+        commission = gross_cost * 0.001
+        slippage = gross_cost * 0.00005
+        expected_cash = 100_000 - gross_cost - commission - slippage
+        assert tracker.cash == pytest.approx(expected_cash)
+        assert tracker.positions["AAPL"]["shares"] == 10
+
+    def test_sell_with_costs(self):
+        tracker = PortfolioTracker(50_000, commission_rate=0.001, slippage_rate=0.00005)
+        tracker.positions["AAPL"] = {"shares": 10, "avg_cost": 100.0}
+
+        output = {
+            "positions": [
+                {"ticker": "AAPL", "action": "sell", "quantity": 10},
+            ]
+        }
+        tracker.apply_trades(output, {"AAPL": 200.0}, date(2024, 1, 1))
+
+        gross_proceeds = 10 * 200.0
+        commission = gross_proceeds * 0.001
+        slippage = gross_proceeds * 0.00005
+        expected_cash = 50_000 + gross_proceeds - commission - slippage
+        assert tracker.cash == pytest.approx(expected_cash)
+
+    def test_trade_records_costs(self):
+        tracker = PortfolioTracker(100_000, commission_rate=0.001, slippage_rate=0.00005)
+        output = {
+            "positions": [
+                {"ticker": "AAPL", "action": "buy", "quantity": 10},
+            ]
+        }
+        tracker.apply_trades(output, {"AAPL": 150.0}, date(2024, 1, 1))
+
+        trade = tracker.trades[0]
+        assert trade.commission == pytest.approx(1500.0 * 0.001)
+        assert trade.slippage == pytest.approx(1500.0 * 0.00005)
+
+    def test_buy_partial_with_costs(self):
+        # With costs, $500 buys fewer shares at $150/share
+        tracker = PortfolioTracker(500, commission_rate=0.01, slippage_rate=0.005)
+        output = {
+            "positions": [
+                {"ticker": "AAPL", "action": "buy", "quantity": 10},
+            ]
+        }
+        tracker.apply_trades(output, {"AAPL": 150.0}, date(2024, 1, 1))
+
+        # effective price = 150 * (1 + 0.01 + 0.005) = 150 * 1.015 = 152.25
+        # affordable = int(500 / 152.25) = 3
+        assert tracker.positions["AAPL"]["shares"] == 3
+        gross_cost = 3 * 150.0
+        commission = gross_cost * 0.01
+        slippage = gross_cost * 0.005
+        assert tracker.cash == pytest.approx(500 - gross_cost - commission - slippage)
+
+    def test_zero_costs_matches_original(self):
+        tracker = PortfolioTracker(100_000, commission_rate=0.0, slippage_rate=0.0)
+        output = {
+            "positions": [
+                {"ticker": "AAPL", "action": "buy", "quantity": 10},
+            ]
+        }
+        tracker.apply_trades(output, {"AAPL": 150.0}, date(2024, 1, 1))
+
+        assert tracker.cash == 100_000 - 10 * 150.0
+        assert tracker.positions["AAPL"]["shares"] == 10
+        assert tracker.trades[0].commission == 0.0
+        assert tracker.trades[0].slippage == 0.0
+
+
 class TestTakeSnapshot:
     def test_first_snapshot_no_daily_return(self):
         tracker = PortfolioTracker(100_000)

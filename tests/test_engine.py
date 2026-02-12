@@ -178,3 +178,33 @@ class TestEngineRun:
         )
         with pytest.raises(ValueError, match="No trading dates"):
             engine.run()
+
+    @patch("src.backtest.engine.run_hedge_fund", side_effect=_mock_run_hedge_fund)
+    @patch("src.backtest.engine.compute_benchmark", return_value=None)
+    def test_engine_with_transaction_costs(self, mock_bench, mock_workflow):
+        """Final value with costs should be less than without costs."""
+        engine_no_costs = BacktestEngine(
+            tickers=["AAPL"],
+            start_date="2024-01-01",
+            end_date="2024-01-31",
+            initial_cash=100_000,
+            frequency="weekly",
+            benchmark_ticker=None,
+            commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result_no_costs = engine_no_costs.run()
+
+        engine_with_costs = BacktestEngine(
+            tickers=["AAPL"],
+            start_date="2024-01-01",
+            end_date="2024-01-31",
+            initial_cash=100_000,
+            frequency="weekly",
+            benchmark_ticker=None,
+            commission_rate=0.001,
+            slippage_rate=0.00005,
+        )
+        result_with_costs = engine_with_costs.run()
+
+        assert result_with_costs.final_value < result_no_costs.final_value

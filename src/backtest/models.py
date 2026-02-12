@@ -15,6 +15,8 @@ class Trade(BaseModel):
     quantity: int
     price: float
     total_value: float
+    commission: float = 0.0
+    slippage: float = 0.0
 
 
 class HoldingDetail(BaseModel):

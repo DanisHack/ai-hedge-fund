@@ -13,9 +13,11 @@ logger = logging.getLogger(__name__)
 class PortfolioTracker:
     """Source of truth for cash and positions across backtest iterations."""
 
-    def __init__(self, initial_cash: float) -> None:
+    def __init__(self, initial_cash: float, commission_rate: float = 0.0, slippage_rate: float = 0.0) -> None:
         self.cash: float = initial_cash
         self.initial_cash: float = initial_cash
+        self.commission_rate: float = commission_rate
+        self.slippage_rate: float = slippage_rate
         # {ticker: {"shares": int, "avg_cost": float}}
         self.positions: dict[str, dict[str, Any]] = {}
         self.snapshots: list[PortfolioSnapshot] = []
@@ -59,15 +61,20 @@ class PortfolioTracker:
                 continue
 
             if action == "buy":
+                effective_price = price * (1 + self.commission_rate + self.slippage_rate)
                 cost = quantity * price
+                total_cost = quantity * effective_price
                 # If insufficient cash, buy what we can afford
-                if cost > self.cash:
-                    quantity = int(self.cash / price)
+                if total_cost > self.cash:
+                    quantity = int(self.cash / effective_price)
                     if quantity <= 0:
                         continue
                     cost = quantity * price
+                    total_cost = quantity * effective_price
 
-                self.cash -= cost
+                commission = cost * self.commission_rate
+                slippage_cost = cost * self.slippage_rate
+                self.cash -= total_cost
 
                 if ticker in self.positions:
                     existing = self.positions[ticker]
@@ -90,6 +97,8 @@ class PortfolioTracker:
                     quantity=quantity,
                     price=price,
                     total_value=cost,
+                    commission=commission,
+                    slippage=slippage_cost,
                 ))
 
             elif action == "sell":
@@ -101,8 +110,11 @@ class PortfolioTracker:
                 if sell_qty <= 0:
                     continue
 
-                proceeds = sell_qty * price
-                self.cash += proceeds
+                gross_proceeds = sell_qty * price
+                commission = gross_proceeds * self.commission_rate
+                slippage_cost = gross_proceeds * self.slippage_rate
+                net_proceeds = gross_proceeds - commission - slippage_cost
+                self.cash += net_proceeds
                 existing["shares"] -= sell_qty
 
                 if existing["shares"] <= 0:
@@ -114,7 +126,9 @@ class PortfolioTracker:
                     action="sell",
                     quantity=sell_qty,
                     price=price,
-                    total_value=proceeds,
+                    total_value=gross_proceeds,
+                    commission=commission,
+                    slippage=slippage_cost,
                 ))
 
     def take_snapshot(self, snap_date: date, current_prices: dict[str, float]) -> PortfolioSnapshot:

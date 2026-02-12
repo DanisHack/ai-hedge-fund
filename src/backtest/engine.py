@@ -31,6 +31,8 @@ class BacktestEngine:
         model_provider: str = "openai",
         show_reasoning: bool = False,
         benchmark_ticker: Optional[str] = "SPY",
+        commission_rate: float = 0.001,
+        slippage_rate: float = 0.00005,
     ) -> None:
         self.tickers = tickers
         self.start_date = start_date
@@ -42,6 +44,8 @@ class BacktestEngine:
         self.model_provider = model_provider
         self.show_reasoning = show_reasoning
         self.benchmark_ticker = benchmark_ticker
+        self.commission_rate = commission_rate
+        self.slippage_rate = slippage_rate
 
     def _generate_step_dates(self) -> list[date]:
         """Generate trading dates based on frequency."""
@@ -63,7 +67,7 @@ class BacktestEngine:
         if not step_dates:
             raise ValueError(f"No trading dates between {self.start_date} and {self.end_date}")
 
-        tracker = PortfolioTracker(self.initial_cash)
+        tracker = PortfolioTracker(self.initial_cash, commission_rate=self.commission_rate, slippage_rate=self.slippage_rate)
 
         with Progress(
             SpinnerColumn(),

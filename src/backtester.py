@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from src.backtest.engine import BacktestEngine
+from src.backtest.export import export_results
 from src.backtest.models import BacktestResult, BenchmarkResult, PerformanceMetrics
 from src.config.settings import DEFAULT_MODEL_NAME, DEFAULT_MODEL_PROVIDER
 
@@ -36,6 +37,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--provider", type=str, default=DEFAULT_MODEL_PROVIDER, help="LLM provider")
     parser.add_argument("--show-reasoning", action="store_true", help="Log agent reasoning")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--export", type=str, default=None, help="Export results to file (e.g. results.json or results.csv)")
+    parser.add_argument("--commission", type=float, default=0.001,
+                        help="Commission rate per trade as decimal (default: 0.001 = 0.1%%)")
+    parser.add_argument("--slippage", type=float, default=0.00005,
+                        help="Slippage rate per trade as decimal (default: 0.00005 = 0.005%%)")
     return parser.parse_args()
 
 
@@ -48,6 +54,8 @@ def _display_summary(result: BacktestResult) -> None:
     pnl_pct = (pnl / result.initial_cash) * 100
     color = "green" if pnl >= 0 else "red"
 
+    total_costs = sum(t.commission + t.slippage for t in result.trades)
+
     lines = [
         f"Tickers:      {', '.join(result.tickers)}",
         f"Period:       {result.start_date} to {result.end_date}",
@@ -57,6 +65,7 @@ def _display_summary(result: BacktestResult) -> None:
         f"Initial:      ${result.initial_cash:>12,.2f}",
         f"Final:        ${result.final_value:>12,.2f}",
         f"P&L:          [{color}]${pnl:>12,.2f} ({pnl_pct:+.2f}%)[/{color}]",
+        f"Tx Costs:     ${total_costs:>12,.2f}",
     ]
 
     console.print(Panel("\n".join(lines), title="Backtest Summary", border_style="cyan"))
@@ -231,6 +240,8 @@ def main():
         model_provider=args.provider,
         show_reasoning=args.show_reasoning,
         benchmark_ticker=benchmark,
+        commission_rate=args.commission,
+        slippage_rate=args.slippage,
     )
 
     try:
@@ -253,6 +264,11 @@ def main():
     console.print()
     _display_equity_curve(result)
     console.print()
+
+    # Export results if requested
+    if args.export:
+        export_results(result, args.export)
+        console.print(f"[bold green]Results exported to {args.export}[/bold green]")
 
 
 if __name__ == "__main__":
