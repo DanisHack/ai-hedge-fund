@@ -7,6 +7,7 @@ from src.agents.buffett import buffett_agent
 from src.agents.fundamentals import fundamentals_agent
 from src.agents.graham import graham_agent
 from src.agents.growth import growth_agent
+from src.agents.macro_regime import macro_regime_agent
 from src.agents.sentiment import sentiment_agent
 from src.agents.technical import technical_agent
 from src.agents.valuation import valuation_agent
@@ -18,6 +19,7 @@ ANALYST_CONFIG: dict[str, tuple[str, Callable[..., dict[str, Any]]]] = {
     "sentiment": ("sentiment_analyst", sentiment_agent),
     "valuation": ("valuation_analyst", valuation_agent),
     "growth": ("growth_analyst", growth_agent),
+    "macro_regime": ("macro_regime_analyst", macro_regime_agent),
 }
 
 # Persona agents: opt-in via --personas flag (LLM-only, require API key)

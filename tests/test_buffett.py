@@ -170,22 +170,22 @@ class TestWorkflowPersonas:
     def test_workflow_without_personas(self):
         from src.graph.workflow import create_workflow
         workflow = create_workflow()
-        # Should have 5 analysts + risk_manager + portfolio_manager = 7 nodes
-        assert len(workflow.nodes) == 7
+        # Should have 6 analysts + risk_manager + portfolio_manager = 8 nodes
+        assert len(workflow.nodes) == 8
 
     def test_workflow_with_buffett_persona(self):
         from src.graph.workflow import create_workflow
         workflow = create_workflow(personas=["buffett"])
-        # Should have 5 analysts + 1 persona + risk_manager + portfolio_manager = 8 nodes
-        assert len(workflow.nodes) == 8
+        # Should have 6 analysts + 1 persona + risk_manager + portfolio_manager = 9 nodes
+        assert len(workflow.nodes) == 9
 
     def test_workflow_with_unknown_persona_ignored(self):
         from src.graph.workflow import create_workflow
         workflow = create_workflow(personas=["nonexistent"])
-        assert len(workflow.nodes) == 7
+        assert len(workflow.nodes) == 8
 
     def test_workflow_with_all_personas(self):
         from src.graph.workflow import create_workflow
         workflow = create_workflow(personas=["all"])
-        # 5 analysts + 2 personas (buffett + graham) + risk_manager + portfolio_manager = 9
-        assert len(workflow.nodes) == 9
+        # 6 analysts + 2 personas (buffett + graham) + risk_manager + portfolio_manager = 10
+        assert len(workflow.nodes) == 10

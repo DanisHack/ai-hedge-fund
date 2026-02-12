@@ -187,17 +187,17 @@ class TestWorkflowPersonas:
     def test_workflow_with_graham_persona(self):
         from src.graph.workflow import create_workflow
         workflow = create_workflow(personas=["graham"])
-        # 5 analysts + 1 persona + risk_manager + portfolio_manager = 8
-        assert len(workflow.nodes) == 8
+        # 6 analysts + 1 persona + risk_manager + portfolio_manager = 9
+        assert len(workflow.nodes) == 9
 
     def test_workflow_with_both_personas(self):
         from src.graph.workflow import create_workflow
         workflow = create_workflow(personas=["buffett", "graham"])
-        # 5 analysts + 2 personas + risk_manager + portfolio_manager = 9
-        assert len(workflow.nodes) == 9
+        # 6 analysts + 2 personas + risk_manager + portfolio_manager = 10
+        assert len(workflow.nodes) == 10
 
     def test_workflow_with_all_includes_graham(self):
         from src.graph.workflow import create_workflow
         workflow = create_workflow(personas=["all"])
-        # 5 analysts + 2 personas (buffett + graham) + risk_manager + portfolio_manager = 9
-        assert len(workflow.nodes) == 9
+        # 6 analysts + 2 personas (buffett + graham) + risk_manager + portfolio_manager = 10
+        assert len(workflow.nodes) == 10
