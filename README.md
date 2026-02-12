@@ -136,7 +136,7 @@ python -m src.main --ticker AAPL --personas buffett,munger,burry --use-llm
 python -m src.main --ticker AAPL --personas all --use-llm
 
 # Pick your LLM provider
-python -m src.main --ticker AAPL --use-llm --provider anthropic --model claude-sonnet-4-20250514
+python -m src.main --ticker AAPL --use-llm --provider anthropic --model claude-sonnet-4-5-20250929
 ```
 
 ### 2. Backtesting — "How would this have performed?"
