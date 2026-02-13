@@ -10,6 +10,7 @@ from langgraph.graph import END, START, StateGraph
 from src.agents.portfolio_manager import portfolio_manager_agent
 from src.agents.risk_manager import risk_manager_agent
 from src.config.agents import ANALYST_CONFIG, PERSONA_CONFIG
+from src.data.polygon_client import prefetch_ticker_data
 from src.graph.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,11 @@ def run_hedge_fund(
     }
 
     logger.info(f"Running hedge fund for {tickers} ({start_date} to {end_date})")
+
+    # Pre-fetch all data so agents hit cache instead of flooding the API
+    logger.info(f"Prefetching market data for {tickers}...")
+    prefetch_ticker_data(tickers, start_date, end_date)
+
     final_state = graph.invoke(initial_state)
     logger.info("Workflow complete.")
 

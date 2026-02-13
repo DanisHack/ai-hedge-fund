@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
+from collections import deque
 from datetime import date, datetime
 from typing import Optional
 
@@ -16,6 +19,34 @@ logger = logging.getLogger(__name__)
 _client: Optional[RESTClient] = None
 
 
+class _RateLimiter:
+    """Thread-safe sliding-window rate limiter."""
+
+    def __init__(self, max_calls: int = 5, period: float = 60.0):
+        self._max_calls = max_calls
+        self._period = period
+        self._lock = threading.Lock()
+        self._timestamps: deque[float] = deque()
+
+    def acquire(self) -> None:
+        """Block until a request slot is available."""
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                # Purge timestamps outside the window
+                while self._timestamps and now - self._timestamps[0] >= self._period:
+                    self._timestamps.popleft()
+                if len(self._timestamps) < self._max_calls:
+                    self._timestamps.append(now)
+                    return
+                # Calculate wait time until oldest timestamp expires
+                wait = self._period - (now - self._timestamps[0]) + 0.1
+            time.sleep(wait)
+
+
+_rate_limiter = _RateLimiter(max_calls=5, period=65.0)  # Polygon free tier: 5 req/min
+
+
 def _get_client() -> RESTClient:
     """Return or create the singleton Polygon RESTClient."""
     global _client
@@ -23,6 +54,22 @@ def _get_client() -> RESTClient:
         validate_polygon_key()
         _client = RESTClient(api_key=POLYGON_API_KEY)
     return _client
+
+
+def _throttled_call(fn, *args, **kwargs):
+    """Call a Polygon API function with rate limiting and retry on 429."""
+    max_retries = 3
+    for attempt in range(max_retries + 1):
+        _rate_limiter.acquire()
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            if "429" in str(e) and attempt < max_retries:
+                wait = 12 * (attempt + 1)
+                logger.debug(f"Rate limited, retrying in {wait}s (attempt {attempt + 1})")
+                time.sleep(wait)
+                continue
+            raise
 
 
 # ── Prices ──────────────────────────────────────────────────────────
@@ -44,7 +91,8 @@ def get_prices(
     client = _get_client()
     logger.debug(f"Fetching prices for {ticker} from {start_date} to {end_date}")
 
-    aggs = client.get_aggs(
+    aggs = _throttled_call(
+        client.get_aggs,
         ticker=ticker,
         multiplier=multiplier,
         timespan=timespan,
@@ -74,6 +122,9 @@ def get_prices(
 # ── Financials ──────────────────────────────────────────────────────
 
 
+_MAX_FINANCIAL_LIMIT = 10  # Always fetch max, slice for smaller requests
+
+
 def get_financial_metrics(
     ticker: str,
     end_date: Optional[str] = None,
@@ -82,16 +133,19 @@ def get_financial_metrics(
     """Fetch stock financials from Polygon vX endpoint."""
     cache = get_cache()
     cache_key_date = end_date or "latest"
-    cached = cache.get("financials", ticker, cache_key_date, str(limit))
+
+    # Check if we already have a full fetch cached
+    cached = cache.get("financials", ticker, cache_key_date)
     if cached is not None:
-        return cached
+        return cached[:limit]
 
     client = _get_client()
-    logger.debug(f"Fetching financials for {ticker}")
+    fetch_limit = max(limit, _MAX_FINANCIAL_LIMIT)
+    logger.debug(f"Fetching financials for {ticker} (limit={fetch_limit})")
 
     params: dict = {
         "ticker": ticker,
-        "limit": limit,
+        "limit": fetch_limit,
         "order": "desc",
         "sort": "period_of_report_date",
     }
@@ -100,18 +154,20 @@ def get_financial_metrics(
 
     metrics = []
     try:
-        for fin in client.vx.list_stock_financials(**params):
+        results = _throttled_call(lambda: list(client.vx.list_stock_financials(**params)))
+        for fin in results:
             m = _parse_financial(ticker, fin)
             if m is not None:
                 metrics.append(m)
-            if len(metrics) >= limit:
+            if len(metrics) >= fetch_limit:
                 break
     except Exception as e:
         logger.warning(f"Failed to fetch financials for {ticker}: {e}")
 
-    cache.set("financials", ticker, cache_key_date, str(limit), metrics)
+    # Cache with normalized key (no limit) so all agents share
+    cache.set("financials", ticker, cache_key_date, metrics)
     logger.debug(f"Got {len(metrics)} financial periods for {ticker}")
-    return metrics
+    return metrics[:limit]
 
 
 def _parse_financial(ticker: str, fin: object) -> Optional[FinancialMetrics]:
@@ -189,7 +245,8 @@ def get_company_news(
 
     articles = []
     try:
-        for n in client.list_ticker_news(**kwargs):
+        news_results = _throttled_call(lambda: list(client.list_ticker_news(**kwargs)))
+        for n in news_results:
             articles.append(CompanyNews(
                 title=n.title,
                 author=getattr(n, "author", None),
@@ -222,7 +279,7 @@ def get_company_details(ticker: str) -> Optional[CompanyDetails]:
     logger.debug(f"Fetching company details for {ticker}")
 
     try:
-        details = client.get_ticker_details(ticker)
+        details = _throttled_call(client.get_ticker_details, ticker)
         if details is None:
             return None
 
@@ -245,6 +302,45 @@ def get_company_details(ticker: str) -> Optional[CompanyDetails]:
     except Exception as e:
         logger.warning(f"Failed to fetch details for {ticker}: {e}")
         return None
+
+
+# ── Prefetch ───────────────────────────────────────────────────
+
+
+def prefetch_ticker_data(
+    tickers: list[str],
+    start_date: str,
+    end_date: str,
+) -> None:
+    """Pre-fetch all data for tickers to warm the cache before agents run.
+
+    This makes a small number of sequential API calls so that when 6+ agents
+    run in parallel, they all hit cache instead of flooding the API.
+    """
+    for ticker in tickers:
+        logger.debug(f"Prefetching data for {ticker}")
+        try:
+            get_prices(ticker, start_date, end_date)
+        except Exception as e:
+            logger.warning(f"Prefetch prices failed for {ticker}: {e}")
+        try:
+            get_financial_metrics(ticker, end_date=end_date, limit=_MAX_FINANCIAL_LIMIT)
+        except Exception as e:
+            logger.warning(f"Prefetch financials failed for {ticker}: {e}")
+        try:
+            get_company_details(ticker)
+        except Exception as e:
+            logger.warning(f"Prefetch details failed for {ticker}: {e}")
+        try:
+            get_company_news(ticker, end_date=end_date, limit=20)
+        except Exception as e:
+            logger.warning(f"Prefetch news failed for {ticker}: {e}")
+
+    # Also prefetch SPY prices (used by macro_regime agent)
+    try:
+        get_prices("SPY", start_date, end_date)
+    except Exception as e:
+        logger.warning(f"Prefetch SPY prices failed: {e}")
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
